@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>场景对浏览器的自适应</title>
+    <script type="text/javascript" src="vendor/three.min.js"></script>
+    <script type="text/javascript" src="vendor/jquery.min.js"></script>
+    <!-- 相机控制 -->
+    <script type="text/javascript" src="vendor/OrbitControls.js"></script>
+    <!-- 依赖文件目录 three.js\examples\js\loaders -->
+    <script type="text/javascript" src="vendor/MTLLoader.js"></script>
+    <script type="text/javascript" src="vendor/OBJLoader.js"></script>
+    <!-- 辅助库，stats.js 显示帧数 -->
+    <script type="text/javascript" src="vendor/stats.min.js"></script>
+    <!-- 辅助库，dataGUI 简化实验流程 -->
+    <script type="text/javascript" src="vendor/dat.gui.min.js"></script>
+
+</head>
+<body>
+<div id="stats-output"></div>
+<script>
+    /**
+     * 浏览器改变大小时更新场景
+     *   - 监听 resize 事件
+     */
+
+    $(function () {
+
+        //辅助库stats.js 初始化
+        var stats;
+        initStats();
+
+        function initStats() {
+            stats = new Stats();
+            stats.setMode(0); //模式0，显示每秒帧数 模式1：检测的是画面渲染时间
+            stats.domElement.style.position = 'absolute';
+            stats.domElement.style.left = '0px';
+            stats.domElement.style.top = '0px';
+            document.getElementById("stats-output").appendChild(stats.domElement);
+            return stats;
+        }
+
+        // TODO: 设置dat.GUI辅助库参数
+        var datGuiControls = new function () {
+            this.rotationSpeed = 0.2; //立方体旋转速度
+            this.bouncingSpeed = 0.03; //球体弹跳速度
+        }
+        var gui = new dat.GUI();
+        gui.add(datGuiControls, 'rotationSpeed', 0, 0.5);
+        gui.add(datGuiControls, 'bouncingSpeed', 0, 0.5);
+
+
+        // 常见场景
+        var scene = new THREE.Scene();
+
+        //坐标轴辅助线
+        var axes = new THREE.AxisHelper(2000);
+//        scene.add(axes);
+
+        //添加网格辅助线
+        var grid=new THREE.GridHelper(400,8, 0xEED5B7, 0xEED5B7);
+        var grid2=new THREE.GridHelper(400,8, 0xEED5B7, 0xEED5B7);
+        grid2.rotation.x=0.5*Math.PI;
+        var grid3=new THREE.GridHelper(400,8, 0xEED5B7, 0xEED5B7);
+        grid3.rotation.z=0.5*Math.PI;
+        scene.add(grid);
+//        scene.add(grid2);
+//        scene.add(grid3);
+
+        //创建地面
+        var planeGeometry = new THREE.PlaneGeometry(400, 400); //平面几何图形
+        var planeMaterial = new THREE.MeshLambertMaterial({color: 0xD3CA69});
+        var plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -0.5 * Math.PI;
+        plane.receiveShadow = true; //接受阴影的物体
+        scene.add(plane);
+
+        
+
+        /**
+         * 在场景中添加两点的箭头连线
+         * */
+        function addArrowToScene(origin,terminusz,leng) {
+            var originz = new THREE.Vector3(origin[0],origin[1],origin[2]);//箭头始点坐标
+            var terminusz  = new THREE.Vector3(terminusz[0],terminusz[1],terminusz[2]);//箭头终点坐标
+            var directionz = new THREE.Vector3().subVectors(terminusz, originz).normalize();//箭头方向
+            var xdiff=parseInt(terminusz.x - origin.x);
+            var ydiff=parseInt(terminusz.y - origin.y);
+            var zdiff=parseInt(terminusz.z - origin.z);
+            var len=Math.pow((xdiff * xdiff + ydiff * ydiff +zdiff * zdiff), 0.5);
+            console.log(len);
+            var arrowz = new THREE.ArrowHelper(directionz, originz, leng, 0xE60018,7, 7);
+            scene.add(arrowz);//将箭头加入场景
+        }
+
+        //添加纹理
+        function createMesh(geom, imageFile) {
+            var texture = THREE.ImageUtils.loadTexture(imageFile);
+            var mat = new THREE.MeshPhongMaterial();
+            mat.map = texture;//材质的Map属性用于添加纹理
+            var mesh = new THREE.Mesh(geom, mat);
+            return mesh;
+        }
+
+        /**
+         * 制作一个盒子几何模型
+         * */
+        function makeBoxGeometry(json) {
+            var config = {
+                length: 10, //长宽高分别对应x,y,z
+                width: 10,
+                height: 10,
+                color: '0x83D369',
+                x: 100,  //坐标
+                y: 100,
+                z: 100,
+                xRotation: 0,  //xyz轴旋转角度
+                yRotation: 0,
+                zRotation: 0,
+                castShadow:true, //投射阴影
+                textureUrl:''
+            };
+            $.extend(true, config, json);
+            var geomtry = new THREE.BoxGeometry(config.length, config.width, config.height);    //立方体几何图形
+            var texture = THREE.ImageUtils.loadTexture(config.textureUrl);//加载纹理贴图
+            var material = new THREE.MeshLambertMaterial({map:texture,//给纹理属性map赋值
+//                side: THREE.DoubleSide,
+//                color: config.color
+            });   //网格朗伯材质
+            var mesh = new THREE.Mesh(geomtry, material);  //几何模型
+            mesh.position.x = config.x;
+            mesh.position.y = config.y;
+            mesh.position.z = config.z;
+            mesh.rotation.x = config.xRotation * Math.PI / 180;
+            mesh.rotation.y = config.yRotation * Math.PI / 180;
+            mesh.rotation.z = config.zRotation * Math.PI / 180;
+            mesh.castShadow = config.castShadow; //会投射阴影的物体
+            return mesh;
+        }
+
+
+        //物料采购
+        var wuliaocaigou=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/wuliaocaigou.jpg',
+            x: -160,  //坐标
+            y: 70,
+            z: 160,
+            castShadow:true //投射阴影
+        });
+        scene.add(wuliaocaigou);
+        //采购计划
+        var caigoujihua=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/caigoujihua.jpg',
+            x: -160,  //坐标
+            y: 120,
+            z: 160,
+            castShadow:true //投射阴影
+        });
+        scene.add(caigoujihua);
+        //发料通知
+        var faliaotongzhi=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/faliaotongzhi.jpg',
+            x: -160,  //坐标
+            y: 70,
+            z: 80,
+            castShadow:true //投射阴影
+        });
+        scene.add(faliaotongzhi);
+
+        //生产制单
+        var shengchanzhidan=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/shengchanzhidan.jpg',
+            x: -160,  //坐标
+            y: 70,
+            z: -10,
+            castShadow:true //投射阴影
+        });
+        scene.add(shengchanzhidan);
+
+        //物料计算
+        var wuliaojisuan=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/wuliaojisuan.jpg',
+            x: -160,  //坐标
+            y: 120,
+            z: -10,
+            castShadow:true //投射阴影
+        });
+        scene.add(wuliaojisuan);
+
+        //物料供应商
+        var wuliaogongyingshang=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/wuliaogongyingshang.jpg',
+            x: -160,  //坐标
+            y: 10,
+            z: 160,
+            castShadow:true //投射阴影
+        });
+        scene.add(wuliaogongyingshang);
+
+        //物料仓库
+        var wuliaocangku=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 20,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/wuliaocangku.jpg',
+            x: -160,  //坐标
+            y: 10,
+            z: 80,
+            castShadow:true //投射阴影
+        });
+        scene.add(wuliaocangku);
+
+        //工厂修饰
+        var gongchang1=makeBoxGeometry({
+            length: 28, //长宽高
+            width: 10,
+            height: 10,
+            color: 'Ox83D369',
+//            textureUrl:'./imgs/gongchang.jpg',
+            x: -160,  //坐标
+            y: 30,
+            z: -10,
+            xRotation:35,
+            castShadow:true //投射阴影
+        });
+        scene.add(gongchang1);
+
+        //工厂修饰
+        var gongchang2=makeBoxGeometry({
+            length: 28, //长宽高
+            width: 10,
+            height: 10,
+            color: 'Ox83D369',
+//            textureUrl:'./imgs/gongchang.jpg',
+            x: -160,  //坐标
+            y: 30,
+            z: 0,
+            xRotation:35,
+            castShadow:true //投射阴影
+        });
+        scene.add(gongchang2);
+        //工厂修饰
+        var gongchang3=makeBoxGeometry({
+            length: 28, //长宽高
+            width: 10,
+            height: 10,
+            color: 'Ox83D369',
+//            textureUrl:'./imgs/gongchang.jpg',
+            x: -160,  //坐标
+            y: 30,
+            z: -20,
+            xRotation:35,
+            castShadow:true //投射阴影
+        });
+        scene.add(gongchang3);
+
+        //工厂
+        var gongchang=makeBoxGeometry({
+            length: 30, //长宽高
+            width: 30,
+            height: 40,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/gongchang.jpg',
+            x: -160,  //坐标
+            y: 15,
+            z: -10,
+            castShadow:true //投射阴影
+        });
+        scene.add(gongchang);
+
+        //成品仓
+        var gongchang=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 30,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/chengpincang.jpg',
+            x: -10,  //坐标
+            y: 15,
+            z: 150,
+            castShadow:true //投射阴影
+        });
+        scene.add(gongchang);
+
+        //发货控制
+        var fahuokongzhi=makeBoxGeometry({
+            length: 40, //长宽高
+            width: 14,
+            height: 15,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/fahuokongzhi.jpg',
+            x: -10,  //坐标
+            y: 7,
+            z: 90,
+            castShadow:true //投射阴影
+        });
+        scene.add(fahuokongzhi);
+
+        //价格控制
+        var jiagekongzhi=makeBoxGeometry({
+            length: 40, //长宽高
+            width: 14,
+            height: 15,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/jiagekongzhi.jpg',
+            x: -10,  //坐标
+            y: 7,
+            z: 60,
+            castShadow:true //投射阴影
+        });
+        scene.add(jiagekongzhi);
+
+        //分货控制
+        var fenhuokongzhi=makeBoxGeometry({
+            length: 40, //长宽高
+            width: 14,
+            height: 15,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/fenhuokongzhi.jpg',
+            x: -10,  //坐标
+            y: 7,
+            z: 30,
+            castShadow:true //投射阴影
+        });
+        scene.add(fenhuokongzhi);
+
+        //代理商
+        var dailishang=makeBoxGeometry({
+            length: 15, //长宽高
+            width: 15,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/dailishang.jpg',
+            x: -30,  //坐标
+            y: 7,
+            z: -50,
+            castShadow:true //投射阴影
+        });
+        scene.add(dailishang);
+
+        //加盟商
+        var jiamengshang=makeBoxGeometry({
+            length: 15, //长宽高
+            width: 15,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/jiamengshang.jpg',
+            x: -5,  //坐标
+            y: 7,
+            z: -50,
+            castShadow:true //投射阴影
+        });
+        scene.add(jiamengshang);
+
+        //分公司
+        var fengongsi=makeBoxGeometry({
+            length: 15, //长宽高
+            width: 15,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/fengongsi.jpg',
+            x: 20,  //坐标
+            y: 7,
+            z: -50,
+            castShadow:true //投射阴影
+        });
+        scene.add(fengongsi);
+
+        //成品仓
+        var gongchang=makeBoxGeometry({
+            length: 45, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/chengpincang.jpg',
+            x: 120,  //坐标
+            y: 10,
+            z: 150,
+            castShadow:true //投射阴影
+        });
+        scene.add(gongchang);
+
+        //POS店铺
+        var posdianpu=makeBoxGeometry({
+            length: 60, //长宽高
+            width: 30,
+            height: 60,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/posdianpu.jpg',
+            x: 150,  //坐标
+            y: 15,
+            z: 60,
+            castShadow:true //投射阴影
+        });
+        scene.add(posdianpu);
+
+
+        //决策分析
+        var juecefenxi=makeBoxGeometry({
+            length: 60, //长宽高
+            width: 30,
+            height: 60,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/juecefenxi.jpg',
+            x: 150,  //坐标
+            y: 15,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(juecefenxi);
+
+        //产品研发
+        var chanpinyanfa=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/chanpinyanfa.jpg',
+            x: 60,  //坐标
+            y: 10,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(chanpinyanfa);
+
+        //订货会
+        var dinghuohui=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/dinghuohui.jpg',
+            x: -20,  //坐标
+            y: 10,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(dinghuohui);
+
+        //客户订单
+        var kehudingdan=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/kehudingdan.jpg',
+            x: -100,  //坐标
+            y: 10,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(kehudingdan);
+
+        //前期备料
+        var qianqibeiliao=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/qianqibeiliao.jpg',
+            x: 60,  //坐标
+            y: 70,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(qianqibeiliao);
+
+        //订货系统
+        var dinghuoxitong=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/dinghuoxitong.jpg',
+            x: -20,  //坐标
+            y: 70,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(dinghuoxitong);
+
+        //生产计划
+        var shengchanjihua=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/shengchanjihua.jpg',
+            x: -100,  //坐标
+            y: 70,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(shengchanjihua);
+
+        //商业智能
+        var shangyezhinneg=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/shangyezhinneg.jpg',
+            x: 150,  //坐标
+            y: 70,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(shangyezhinneg);
+
+        //数据挖掘
+        var shujuwajue=makeBoxGeometry({
+            length: 50, //长宽高
+            width: 20,
+            height: 30,
+            color: 'Ox83D369',
+            textureUrl:'./imgs/shujuwajue.jpg',
+            x: 150,  //坐标
+            y: 120,
+            z: -130,
+            castShadow:true //投射阴影
+        });
+        scene.add(shujuwajue);
+
+
+//        //人物底座
+//        var geomtry = new THREE.BoxGeometry(100, 50, 25);    //立方体几何图形
+//        var material = new THREE.MeshLambertMaterial({color: 0xff0000});   //网格朗伯材质
+//        var mesh = new THREE.Mesh(geomtry, material);  //几何模型
+//        mesh.position.y = 12;
+//        mesh.rotation.x = -0.5 * Math.PI;
+//        mesh.castShadow = true; //会投射阴影的物体
+//        scene.add(mesh);
+//
+        //柱子
+        var geomtry2 = new THREE.BoxGeometry(5, 36, 5);    //立方体几何图形
+        var material2 = new THREE.MeshLambertMaterial({color: 0xff0000});   //网格朗伯材质
+        var mesh2 = new THREE.Mesh(geomtry2, material2);  //几何模型
+        mesh2.position.x = -155;
+        mesh2.position.y = 18;
+        mesh2.position.z = -33;
+        mesh2.castShadow = true; //会投射阴影的物体
+        scene.add(mesh2);
+//
+//        //皮球
+//        var geomtry3 = new THREE.SphereGeometry(10, 20, 20);    //立方体几何图形
+//        var material3 = new THREE.MeshLambertMaterial({color: 0xff0000});   //网格朗伯材质
+//        var mesh3 = new THREE.Mesh(geomtry3, material3);  //几何模型
+//        mesh3.position.y = 10;
+//        mesh3.position.x = 50;
+//        mesh3.position.z = 100;
+//        mesh3.castShadow = true; //会投射阴影的物体
+//        scene.add(mesh3);
+//
+//        /* OBJ模型 */
+//        var loader = new THREE.OBJLoader();
+//        loader.load('female02/female02.obj', function (obj) {
+//            console.log(obj);
+//            obj.scale.set(0.5, 0.5, 0.5);
+//            obj.position.y = 25;
+//            obj.position.x = -25;
+//            obj.castShadow = true; //会投射阴影的物体
+//            scene.add(obj);
+//
+//        });
+//        /* 加载带材质的OBJ模型 */
+//        var mtlLoader = new THREE.MTLLoader();
+//        mtlLoader.setPath('female02/');
+//        mtlLoader.load('female02.mtl', function (materials) {
+//            materials.preload();
+//            var objLoader = new THREE.OBJLoader();
+//            objLoader.setMaterials(materials);
+//            objLoader.setPath('female02/');
+//            objLoader.load('female02.obj', function (object) {
+//                object.scale.set(0.5, 0.5, 0.5);
+//                object.position.y = 25;
+//                object.position.x = 25;
+//                object.castShadow = true; //会投射阴影的物体
+//                scene.add(object);
+//            });
+//        });
+
+
+
+        //左侧箭头连线
+        addArrowToScene([-160,10,55],[-160,10,15],40);
+        addArrowToScene([-160,70,15],[-160,70,55],40);
+        addArrowToScene([-160,10,135],[-160,10,105],30);
+        addArrowToScene([-160,55,80],[-160,25,80],30);
+        addArrowToScene([-160,55,160],[-160,25,160],30);
+        addArrowToScene([-138,10,-5],[-10,10,160],175);
+        addArrowToScene([-160,105,160],[-160,75,160],25);//采购计划-》物料采购
+        addArrowToScene([-160,105,-10],[-160,75,-10],25);//物料计算-》生产制单
+        addArrowToScene([-160,120,15],[-160,120,125],120);//物料计算-》采购计划
+
+        //中测箭头连线
+        addArrowToScene([-10,7,40],[-10,7,50],10);
+        addArrowToScene([-10,7,70],[-10,7,80],10);
+        addArrowToScene([-10,7,100],[-10,7,140],30);
+        addArrowToScene([20,10,150],[90,10,150],70);
+        addArrowToScene([-30,7,-30],[-10,7,20],45);
+        addArrowToScene([-5,7,-30],[-10,7,20],40);
+        addArrowToScene([10,7,-30],[-10,7,20],45);
+        addArrowToScene([60,55,-130],[60,25,-130],30);//产品研发
+        addArrowToScene([-20,55,-130],[-20,25,-130],30);
+        addArrowToScene([-100,55,-130],[-100,25,-130],30);
+        addArrowToScene([30,10,-130],[10,10,-130],20);//产品研发-》订货会
+        addArrowToScene([-50,10,-130],[-70,10,-130],20);
+        addArrowToScene([150,55,-130],[150,35,-130],20);
+        addArrowToScene([150,105,-130],[150,70,-130],20);
+        //右侧箭头连线
+        addArrowToScene([130,10,130],[130,10,90],35);
+        addArrowToScene([150,15,20],[150,15,-95],110);
+
+        // var light= new THREE.PointLight(0xffffff,1.5,0,10000);
+        var light = new THREE.SpotLight(0xffffff, 0.7, 0, 10000);
+        light.position.set(200, 300, 200);
+        light.castShadow = true;//会投射阴影的光源
+        scene.add(light);   //场景中添加点光源
+
+        //加入环境光使环境亮一点
+        scene.add(new THREE.AmbientLight(0x333333));
+
+        var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(250, 300, 250);
+        camera.lookAt(scene.position);
+
+        var renderer = new THREE.WebGLRenderer();
+        renderer.setClearColor(0xEEEEEE); //设置渲染器背景
+        renderer.shadowMapEnabled = true; //是否渲染阴影效果
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        document.body.appendChild(renderer.domElement);
+
+        var step = 0.04;
+
+        function render() {
+            stats.update();//更新帧率
+
+            //TODO：使用dat.GUI辅助库
+            mesh2.rotation.y += datGuiControls.rotationSpeed;
+//            step += datGuiControls.bouncingSpeed;
+//            mesh3.position.x = 20 + (10 * (Math.cos(step)));
+//            mesh3.position.y = 10 + (10 * Math.abs(Math.sin(step)));
+
+            requestAnimationFrame(render);
+            renderer.render(scene, camera);
+        }
+
+        render();
+        //相机控制器
+        var controls = new THREE.OrbitControls(camera);
+
+        //TODO:加入浏览器大小自适应
+        window.addEventListener('resize', onResize, false);
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight; //camera.aspect属性表示屏幕长宽比
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    });
+
+
+</script>
+</body>
+</html>
